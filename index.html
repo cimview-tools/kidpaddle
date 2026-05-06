@@ -1,0 +1,988 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Kid Paddle - Monster Runner</title>
+  <style>
+    * { box-sizing: border-box; }
+    html, body { margin: 0; min-height: 100%; }
+    body {
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      background: radial-gradient(circle at top, #35204e 0%, #180d24 55%, #08050c 100%);
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      color: white;
+    }
+    .page { width: min(980px, 96vw); text-align: center; }
+    h1 {
+      margin: 18px 0 6px;
+      font-size: clamp(2rem, 5vw, 4rem);
+      color: #ff9f1c;
+      text-shadow: 4px 4px 0 #000, 0 0 18px rgba(255,159,28,.35);
+      letter-spacing: 1px;
+    }
+    .subtitle { margin: 0 0 14px; opacity: .85; }
+    .game-wrap {
+      position: relative;
+      border: 5px solid #111;
+      border-radius: 18px;
+      overflow: hidden;
+      box-shadow: 0 22px 60px rgba(0,0,0,.55), inset 0 0 0 3px rgba(255,255,255,.06);
+      background: #211331;
+    }
+    canvas { width: 100%; height: auto; display: block; image-rendering: pixelated; }
+    .fs-btn, .test-btn {
+      position: absolute;
+      z-index: 10;
+      padding: 7px 10px;
+      border-radius: 9px;
+      border: 1px solid #333;
+      background: rgba(17,17,17,.88);
+      color: #fff;
+      cursor: pointer;
+      font-weight: 700;
+    }
+    .fs-btn { right: 10px; top: 10px; }
+    .test-btn { right: 10px; top: 48px; font-size: 12px; }
+    .fullscreen-warning {
+      display: none;
+      position: absolute;
+      right: 10px;
+      top: 86px;
+      z-index: 11;
+      max-width: 340px;
+      padding: 10px 12px;
+      border-radius: 10px;
+      border: 1px solid rgba(255,255,255,.25);
+      background: rgba(0,0,0,.78);
+      color: #fff;
+      font-size: 13px;
+      text-align: left;
+    }
+    .fullscreen-warning.visible { display: block; }
+    .hud {
+      display: flex;
+      justify-content: center;
+      gap: 14px;
+      flex-wrap: wrap;
+      margin: 14px 0 20px;
+      font-size: .95rem;
+      opacity: .9;
+    }
+    kbd {
+      background: #111;
+      border: 1px solid #555;
+      border-bottom-width: 3px;
+      border-radius: 6px;
+      padding: 2px 7px;
+      color: #fff;
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <h1>KID PADDLE — MONSTER RUNNER</h1>
+    <p class="subtitle">Runner arcade : saute, tire, baisse-toi sous les volants, évite les blindés et affronte les boss.</p>
+    <div class="game-wrap" id="gameWrap">
+      <button id="fsBtn" class="fs-btn" type="button">⛶ Plein écran</button>
+      <button id="testBtn" class="test-btn" type="button">Tests</button>
+      <div id="fullscreenWarning" class="fullscreen-warning"></div>
+      <canvas id="game" width="900" height="360" aria-label="Jeu Kid Paddle Monster Runner"></canvas>
+    </div>
+    <div class="hud">
+      <span><kbd>Espace</kbd> / <kbd>↑</kbd> sauter</span>
+      <span><kbd>↓</kbd> se baisser</span>
+      <span><kbd>F</kbd> / <kbd>Ctrl</kbd> tirer</span>
+      <span><kbd>M</kbd> son on/off</span>
+      <span><kbd>P</kbd> plein écran</span>
+      <span><kbd>Entrée</kbd> recommencer</span>
+      <span>Mobile : gauche = saut, droite = tir</span>
+    </div>
+  </main>
+
+  <script>
+    'use strict';
+
+    var canvas = document.getElementById('game');
+    var ctx = canvas.getContext('2d');
+    var gameWrap = document.getElementById('gameWrap');
+    var fsBtn = document.getElementById('fsBtn');
+    var testBtn = document.getElementById('testBtn');
+    var fullscreenWarning = document.getElementById('fullscreenWarning');
+
+    var W = canvas.width;
+    var H = canvas.height;
+    var groundY = 292;
+    var BOSS_EVERY = 500;
+    var BOSS_STOP_X = 650;
+    var BOSS_BASE_HP = 6;
+
+    var state = {
+      started: false,
+      gameOver: false,
+      score: 0,
+      best: Number(localStorage.getItem('kidRunnerBest') || 0),
+      baseSpeed: 5,
+      speed: 5,
+      fastMode: false,
+      frame: 0,
+      spawnTimer: 60,
+      shootCooldown: 0,
+      lastBand: 0,
+      lastBossBand: 0,
+      fullscreenBlocked: false,
+      fullscreenMessage: '',
+      bossAttackTimer: 0
+    };
+
+    var kid = {
+      x: 88,
+      y: groundY - 82,
+      w: 54,
+      h: 82,
+      vy: 0,
+      grounded: true,
+      ducking: false
+    };
+
+    var bullets = [];
+    var monsters = [];
+    var particles = [];
+
+    var ArcadeSound = (function () {
+      var audioCtx = null;
+      var muted = false;
+      var musicTimer = null;
+      var musicStep = 0;
+      var musicOn = false;
+
+      function ctxAudio() {
+        if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        if (audioCtx.state === 'suspended') {
+          var resumePromise = audioCtx.resume();
+          if (resumePromise && typeof resumePromise.catch === 'function') resumePromise.catch(function () {});
+        }
+        return audioCtx;
+      }
+
+      function beep(freq, duration, type, volume, slideTo) {
+        if (muted) return;
+        freq = freq || 440;
+        duration = duration || 0.08;
+        type = type || 'square';
+        volume = volume || 0.06;
+        var ac;
+        try { ac = ctxAudio(); } catch (err) { return; }
+        var now = ac.currentTime;
+        var osc = ac.createOscillator();
+        var gain = ac.createGain();
+        osc.type = type;
+        osc.frequency.setValueAtTime(freq, now);
+        if (slideTo) osc.frequency.exponentialRampToValueAtTime(Math.max(40, slideTo), now + duration);
+        gain.gain.setValueAtTime(0.0001, now);
+        gain.gain.exponentialRampToValueAtTime(volume, now + 0.01);
+        gain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
+        osc.connect(gain);
+        gain.connect(ac.destination);
+        osc.start(now);
+        osc.stop(now + duration + 0.02);
+      }
+
+      function noise(duration, volume) {
+        if (muted) return;
+        duration = duration || 0.12;
+        volume = volume || 0.05;
+        var ac;
+        try { ac = ctxAudio(); } catch (err) { return; }
+        var buffer = ac.createBuffer(1, ac.sampleRate * duration, ac.sampleRate);
+        var data = buffer.getChannelData(0);
+        for (var i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
+        var source = ac.createBufferSource();
+        var gain = ac.createGain();
+        gain.gain.setValueAtTime(volume, ac.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.0001, ac.currentTime + duration);
+        source.connect(gain);
+        gain.connect(ac.destination);
+        source.buffer = buffer;
+        source.start();
+      }
+
+      function playMusicTick() {
+        if (!musicOn) return;
+        if (!muted) {
+          var melody = [196, 247, 294, 247, 330, 294, 247, 220, 196, 247, 330, 392, 330, 294, 247, 220];
+          var bass = [98, 98, 123, 123, 147, 147, 123, 123];
+          var fast = state.fastMode;
+          beep(melody[musicStep % melody.length], fast ? 0.075 : 0.09, 'square', 0.018);
+          if (musicStep % 2 === 0) beep(bass[Math.floor(musicStep / 2) % bass.length], 0.08, 'triangle', 0.014);
+          if (musicStep % 4 === 2) noise(0.025, 0.012);
+          musicStep++;
+        }
+        clearTimeout(musicTimer);
+        musicTimer = setTimeout(playMusicTick, state.fastMode ? 115 : 150);
+      }
+
+      return {
+        unlock: function () { try { ctxAudio(); } catch (err) {} },
+        startMusic: function () { if (musicOn) return; musicOn = true; musicStep = 0; playMusicTick(); },
+        stopMusic: function () { musicOn = false; clearTimeout(musicTimer); musicTimer = null; },
+        toggleMute: function () { muted = !muted; return muted; },
+        isMuted: function () { return muted; },
+        start: function () { beep(330, 0.08, 'square', 0.05, 660); setTimeout(function () { beep(880, 0.08, 'square', 0.045); }, 90); this.startMusic(); },
+        jump: function () { beep(260, 0.11, 'square', 0.045, 520); },
+        shoot: function () { beep(720, 0.045, 'square', 0.04, 360); },
+        kill: function () { beep(640, 0.06, 'square', 0.05, 920); setTimeout(function () { beep(980, 0.055, 'square', 0.04); }, 60); },
+        blocked: function () { beep(130, 0.08, 'square', 0.05, 80); },
+        switchMode: function (fast) { beep(fast ? 440 : 660, 0.09, 'square', 0.055, fast ? 960 : 330); setTimeout(function () { beep(fast ? 880 : 440, 0.12, 'square', 0.045); }, 95); },
+        boss: function () { beep(110, 0.16, 'sawtooth', 0.055, 220); setTimeout(function () { beep(82, 0.18, 'sawtooth', 0.05, 180); }, 120); },
+        gameOver: function () { this.stopMusic(); beep(260, 0.12, 'triangle', 0.055, 180); setTimeout(function () { beep(190, 0.14, 'triangle', 0.05, 120); }, 120); setTimeout(function () { noise(0.18, 0.04); }, 220); }
+      };
+    }());
+
+    function reset() {
+      ArcadeSound.unlock();
+      state.started = true;
+      state.gameOver = false;
+      state.score = 0;
+      state.baseSpeed = 5;
+      state.speed = 5;
+      state.fastMode = false;
+      state.frame = 0;
+      state.spawnTimer = 50;
+      state.shootCooldown = 0;
+      state.lastBand = 0;
+      state.lastBossBand = 0;
+      kid.y = groundY - kid.h;
+      kid.vy = 0;
+      kid.grounded = true;
+      kid.ducking = false;
+      bullets.length = 0;
+      monsters.length = 0;
+      particles.length = 0;
+      ArcadeSound.start();
+    }
+
+    function jump() {
+      if (!state.started) reset();
+      if (state.gameOver) return;
+      if (kid.grounded) {
+        kid.vy = -14.7;
+        kid.grounded = false;
+        kid.ducking = false;
+        puff(kid.x + 20, groundY, 8, '#d5c3a6');
+        ArcadeSound.jump();
+      }
+    }
+
+    function crouch() {
+      if (!state.started) reset();
+      if (state.gameOver) return;
+      if (kid.grounded) kid.ducking = true;
+    }
+
+    function shoot() {
+      if (!state.started) reset();
+      if (state.gameOver || state.shootCooldown > 0) return;
+      var hitbox = getKidHitbox();
+      bullets.push({ x: hitbox.x + hitbox.w + 10, y: hitbox.y + hitbox.h * 0.42, vx: 12, r: 5 });
+      state.shootCooldown = 15;
+      puff(hitbox.x + hitbox.w + 12, hitbox.y + hitbox.h * 0.42, 5, '#ff9f1c');
+      ArcadeSound.shoot();
+    }
+
+    window.addEventListener('keydown', function (e) {
+      if (e.code === 'Space' || e.code === 'ArrowUp') { e.preventDefault(); jump(); }
+      if (e.code === 'KeyF' || e.code === 'ControlLeft' || e.code === 'ControlRight') { e.preventDefault(); shoot(); }
+      if (e.code === 'ArrowDown') { e.preventDefault(); crouch(); }
+      if (e.code === 'Enter' && state.gameOver) reset();
+      if (e.code === 'KeyM') {
+        var muted = ArcadeSound.toggleMute();
+        puff(W - 50, 35, 12, muted ? '#999999' : '#ffd166');
+      }
+      if (e.code === 'KeyP') { e.preventDefault(); toggleFullscreen(); }
+    });
+
+    window.addEventListener('keyup', function (e) {
+      if (e.code === 'ArrowDown') kid.ducking = false;
+    });
+
+    canvas.addEventListener('pointerdown', function (e) {
+      var rect = canvas.getBoundingClientRect();
+      var x = e.clientX - rect.left;
+      if (x < rect.width / 2) jump(); else shoot();
+    });
+
+    function currentBand() { return Math.floor(state.score / 250); }
+
+    function updateSpeedMode() {
+      var before = state.fastMode;
+      var band = currentBand();
+      state.fastMode = band % 2 === 1;
+      state.baseSpeed = state.fastMode ? 9.2 : 5.2;
+      state.speed = state.baseSpeed + Math.min(3.2, (state.score % 250) / 140);
+      if (band !== state.lastBand) {
+        state.lastBand = band;
+        puff(W / 2, 90, 38, state.fastMode ? '#ff4d2d' : '#7be37b');
+      }
+      if (before !== state.fastMode && state.score >= 250) ArcadeSound.switchMode(state.fastMode);
+    }
+
+    function getBossLevel() {
+      return Math.max(1, Math.floor(state.score / BOSS_EVERY));
+    }
+
+    function getBossHp(level) {
+      return BOSS_BASE_HP + (level - 1) * 4;
+    }
+
+    function getBossAttackDelay(level) {
+      return Math.max(38, 96 - level * 9);
+    }
+
+    function spawnBoss() {
+      // Phase boss : on nettoie l'écran pour éviter les collisions injustes.
+      var level = getBossLevel();
+      var hp = getBossHp(level);
+      monsters.length = 0;
+      bullets.length = 0;
+      state.spawnTimer = 9999;
+      state.bossAttackTimer = 65;
+      monsters.push({
+        kind: 'boss', killable: true, lane: 'boss', x: W + 30, y: groundY - 118,
+        w: 118, h: 118, color: '#ffe45e', eye: Math.min(5, 2 + level), hp: hp, maxHp: hp,
+        level: level, attackCooldown: getBossAttackDelay(level), bob: Math.random() * 10
+      });
+      ArcadeSound.boss();
+    }
+
+    function spawnBossAttack(boss) {
+      var level = boss.level || 1;
+      var pattern = Math.floor(Math.random() * Math.min(3, level + 1));
+      var attack;
+      if (pattern === 0) {
+        // boule basse : il faut sauter
+        attack = { kind: 'bossAttack', attackType: 'low', x: boss.x - 12, y: groundY - 26, w: 28, h: 26, vx: -(7 + level * 0.6), color: '#ff5a2c', eye: 0, hp: 999, killable: false, bob: 0 };
+      } else if (pattern === 1) {
+        // projectile haut : il faut se baisser
+        attack = { kind: 'bossAttack', attackType: 'high', x: boss.x - 12, y: groundY - 105, w: 34, h: 28, vx: -(7.5 + level * 0.6), color: '#8ed1d5', eye: 0, hp: 999, killable: false, bob: 0 };
+      } else {
+        // attaque rebondissante : timing de saut plus exigeant
+        attack = { kind: 'bossAttack', attackType: 'bounce', x: boss.x - 12, y: groundY - 34, w: 30, h: 30, vx: -(6.2 + level * 0.45), vy: -7.5, color: '#d75cff', eye: 0, hp: 999, killable: false, bob: 0 };
+      }
+      monsters.push(attack);
+      puff(attack.x, attack.y, 8, attack.color);
+      ArcadeSound.blocked();
+    }
+
+    function spawnMonster() {
+      var roll = Math.random();
+      var m;
+      if (roll < 0.30) {
+        m = { kind: 'armored', killable: false, lane: 'ground', x: W + 20, y: groundY - 46, w: 60, h: 46, color: '#c75146', eye: 1, hp: 999, bob: Math.random() * 10 };
+      } else if (roll < 0.58) {
+        m = { kind: 'flying', killable: true, lane: 'mid', x: W + 20, y: groundY - 118, w: 56, h: 42, color: '#8ed1d5', eye: 2, hp: 1, bob: Math.random() * 10 };
+      } else {
+        var tough = Math.random() < 0.35;
+        m = { kind: 'classic', killable: true, lane: 'ground', x: W + 20, y: groundY - (tough ? 54 : 42), w: tough ? 62 : 48, h: tough ? 54 : 42, color: tough ? '#f28c28' : '#85c63d', eye: tough ? 3 : 1, hp: tough ? 2 : 1, bob: Math.random() * 10 };
+      }
+      monsters.push(m);
+    }
+
+    function puff(x, y, count, color) {
+      for (var i = 0; i < count; i++) {
+        particles.push({ x: x, y: y, vx: (Math.random() - 0.5) * 5.8, vy: (Math.random() - 0.9) * 4.4, life: 22 + Math.random() * 16, color: color, size: 2 + Math.random() * 4 });
+      }
+    }
+
+    function update() {
+      if (!state.started || state.gameOver) return;
+
+      state.frame++;
+      state.score += state.fastMode ? 0.20 : 0.12;
+      updateSpeedMode();
+      if (state.shootCooldown > 0) state.shootCooldown--;
+
+      var bossBand = Math.floor(state.score / BOSS_EVERY);
+      if (bossBand > state.lastBossBand) {
+        state.lastBossBand = bossBand;
+        spawnBoss();
+      }
+
+      kid.vy += 0.72;
+      kid.y += kid.vy;
+      if (kid.y >= groundY - kid.h) {
+        kid.y = groundY - kid.h;
+        kid.vy = 0;
+        kid.grounded = true;
+      }
+      if (!kid.grounded) kid.ducking = false;
+
+      if (!isBossActive()) {
+        state.spawnTimer--;
+        if (state.spawnTimer <= 0) {
+          spawnMonster();
+          state.spawnTimer = Math.max(38, 98 - state.speed * 4 + Math.random() * 34);
+        }
+      } else {
+        updateBossAttacks();
+      }
+
+      var i;
+      for (i = bullets.length - 1; i >= 0; i--) {
+        bullets[i].x += bullets[i].vx;
+        if (bullets[i].x > W + 20) bullets.splice(i, 1);
+      }
+
+      for (i = monsters.length - 1; i >= 0; i--) {
+        if (monsters[i].kind === 'boss') {
+          // Le boss avance jusqu'à sa position d'arène puis reste à distance.
+          if (monsters[i].x > BOSS_STOP_X) monsters[i].x -= state.speed * 0.70;
+          if (monsters[i].x < BOSS_STOP_X) monsters[i].x = BOSS_STOP_X;
+        } else if (monsters[i].kind === 'bossAttack') {
+          monsters[i].x += monsters[i].vx;
+          if (monsters[i].attackType === 'bounce') {
+            monsters[i].vy += 0.55;
+            monsters[i].y += monsters[i].vy;
+            if (monsters[i].y > groundY - monsters[i].h) {
+              monsters[i].y = groundY - monsters[i].h;
+              monsters[i].vy = -7.5;
+            }
+          }
+        } else {
+          monsters[i].x -= state.speed;
+        }
+        if (monsters[i].x + monsters[i].w < -30) monsters.splice(i, 1);
+      }
+
+      handleBulletCollisions();
+      handlePlayerCollisions();
+
+      for (i = particles.length - 1; i >= 0; i--) {
+        var p = particles[i];
+        p.x += p.vx;
+        p.y += p.vy;
+        p.vy += 0.15;
+        p.life--;
+        if (p.life <= 0) particles.splice(i, 1);
+      }
+    }
+
+    function isBossActive() {
+      for (var i = 0; i < monsters.length; i++) {
+        if (monsters[i].kind === 'boss') return true;
+      }
+      return false;
+    }
+
+    function getActiveBoss() {
+      for (var i = 0; i < monsters.length; i++) {
+        if (monsters[i].kind === 'boss') return monsters[i];
+      }
+      return null;
+    }
+
+    function updateBossAttacks() {
+      var boss = getActiveBoss();
+      if (!boss) return;
+      if (boss.x > BOSS_STOP_X + 8) return;
+      boss.attackCooldown--;
+      if (boss.attackCooldown <= 0) {
+        spawnBossAttack(boss);
+        boss.attackCooldown = getBossAttackDelay(boss.level || 1) + Math.floor(Math.random() * 22);
+      }
+    }
+
+    function handleBulletCollisions() {
+      for (var i = monsters.length - 1; i >= 0; i--) {
+        var m = monsters[i];
+        for (var j = bullets.length - 1; j >= 0; j--) {
+          var b = bullets[j];
+          if (m.kind !== 'bossAttack' && b.x > m.x && b.x < m.x + m.w && b.y > m.y && b.y < m.y + m.h) {
+            bullets.splice(j, 1);
+            puff(b.x, b.y, 10, m.killable ? '#ffd166' : '#b8b8b8');
+            if (!m.killable) {
+              puff(m.x + m.w / 2, m.y + m.h / 2, 12, '#ffffff');
+              ArcadeSound.blocked();
+            } else {
+              m.hp -= m.kind === 'boss' ? 2 : 1;
+              if (m.hp <= 0) {
+                puff(m.x + m.w / 2, m.y + m.h / 2, m.kind === 'boss' ? 48 : 24, m.color);
+                monsters.splice(i, 1);
+                state.score += m.kind === 'boss' ? 100 + (m.level || 1) * 25 : (m.lane === 'mid' ? 14 : 10);
+                if (m.kind === 'boss') {
+                  removeBossAttacks();
+                  state.spawnTimer = 35;
+                }
+                ArcadeSound.kill();
+              }
+            }
+            break;
+          }
+        }
+      }
+    }
+
+    function removeBossAttacks() {
+      for (var i = monsters.length - 1; i >= 0; i--) {
+        if (monsters[i].kind === 'bossAttack') monsters.splice(i, 1);
+      }
+    }
+
+    function handlePlayerCollisions() {
+      var hitboxKid = getKidHitbox();
+      for (var i = 0; i < monsters.length; i++) {
+        var m = monsters[i];
+        if (rectsOverlap(hitboxKid, getMonsterHitbox(m))) {
+          state.gameOver = true;
+          state.best = Math.max(state.best, Math.floor(state.score));
+          localStorage.setItem('kidRunnerBest', state.best);
+          puff(kid.x + kid.w / 2, kid.y + kid.h / 2, 32, '#ff4d4d');
+          ArcadeSound.gameOver();
+          break;
+        }
+      }
+    }
+
+    function getKidHitbox() {
+      if (kid.ducking && kid.grounded) {
+        return { x: kid.x + 8, y: kid.y + 45, w: kid.w + 22, h: kid.h - 45 };
+      }
+      return { x: kid.x + 9, y: kid.y + 5, w: kid.w + 14, h: kid.h - 8 };
+    }
+
+    function getMonsterHitbox(m) {
+      if (m.kind === 'bossAttack') {
+        if (m.attackType === 'high') return { x: m.x + 5, y: m.y + 2, w: m.w - 10, h: m.h - 14 };
+        return { x: m.x + 4, y: m.y + 4, w: m.w - 8, h: m.h - 8 };
+      }
+      if (m.kind === 'flying') return { x: m.x + 10, y: m.y + 2, w: m.w - 20, h: m.h - 20 };
+      if (m.kind === 'boss') return { x: m.x + 12, y: m.y + 12, w: m.w - 24, h: m.h - 18 };
+      return { x: m.x + 5, y: m.y + 6, w: m.w - 10, h: m.h - 8 };
+    }
+
+    function rectsOverlap(a, b) {
+      return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+    }
+
+    function drawBackground() {
+      var g = ctx.createLinearGradient(0, 0, 0, H);
+      if (state.fastMode) {
+        g.addColorStop(0, '#5a1010');
+        g.addColorStop(0.5, '#3d1230');
+        g.addColorStop(1, '#14050a');
+      } else {
+        g.addColorStop(0, '#3b2456');
+        g.addColorStop(0.55, '#251538');
+        g.addColorStop(1, '#110a19');
+      }
+      ctx.fillStyle = g;
+      ctx.fillRect(0, 0, W, H);
+
+      ctx.fillStyle = '#101010';
+      ctx.fillRect(0, groundY, W, 68);
+      ctx.fillStyle = state.fastMode ? '#9a2a12' : '#46290e';
+      ctx.fillRect(0, groundY + 7, W, 7);
+      ctx.strokeStyle = state.fastMode ? 'rgba(255,230,80,.75)' : 'rgba(255,159,28,.45)';
+      ctx.setLineDash([18, 16]);
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(-(state.frame * state.speed) % 34, groundY + 24);
+      ctx.lineTo(W, groundY + 24);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+
+    function drawKidPaddle() {
+      var x = kid.x;
+      var y = kid.y;
+      var run = Math.sin(state.frame / 5) * 4;
+      var isCrouching = kid.ducking && kid.grounded;
+      var dy = isCrouching ? 18 : 0;
+      var scaleY = isCrouching ? 0.72 : 1;
+      var tilt = isCrouching ? -0.05 : 0;
+
+      ctx.save();
+      ctx.translate(x, y + dy);
+      ctx.rotate(tilt);
+      ctx.scale(1, scaleY);
+
+      ctx.strokeStyle = '#111'; ctx.lineWidth = 5; ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.moveTo(23, 61); ctx.lineTo(16 + run, 82); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(34, 61); ctx.lineTo(43 - run, 82); ctx.stroke();
+      ctx.fillStyle = '#fff'; ctx.fillRect(8 + run, 78, 22, 8); ctx.fillRect(34 - run, 78, 22, 8);
+      ctx.strokeStyle = '#111'; ctx.lineWidth = 2; ctx.strokeRect(8 + run, 78, 22, 8); ctx.strokeRect(34 - run, 78, 22, 8);
+      ctx.fillStyle = '#101010'; roundRect(18, 52, 25, 17, 6, true, true);
+
+      ctx.fillStyle = '#f28c28'; ctx.strokeStyle = '#111'; ctx.lineWidth = 3;
+      roundRect(17, 36, 29, 24, 9, true, true);
+      ctx.strokeStyle = '#111'; ctx.lineWidth = 5;
+      ctx.beginPath(); ctx.moveTo(43, 43); ctx.lineTo(66, 36); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(17, 44); ctx.lineTo(5, 54); ctx.stroke();
+      ctx.fillStyle = '#f28c28'; ctx.beginPath(); ctx.arc(5, 55, 5, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+
+      ctx.fillStyle = '#ff7b22'; roundRect(61, 28, 24, 15, 8, true, true);
+      ctx.fillStyle = '#d94b2b'; ctx.fillRect(82, 31, 17, 8);
+      ctx.beginPath(); ctx.arc(102, 35, 10, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+      ctx.strokeStyle = '#111'; ctx.lineWidth = 3; ctx.strokeRect(82, 31, 17, 8);
+
+      ctx.fillStyle = '#f28c28'; ctx.strokeStyle = '#111'; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.ellipse(37, 23, 24, 22, -0.05, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+      ctx.beginPath(); ctx.ellipse(15, 25, 8, 10, 0, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(56, 26); ctx.quadraticCurveTo(82, 26, 63, 36); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(54, 43); ctx.quadraticCurveTo(46, 48, 39, 43); ctx.stroke();
+      ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.ellipse(47, 19, 11, 14, 0, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = '#111'; ctx.beginPath(); ctx.arc(51, 23, 2.8, 0, Math.PI * 2); ctx.fill();
+
+      ctx.strokeStyle = '#111'; ctx.lineWidth = 4;
+      for (var i = 0; i < 6; i++) {
+        ctx.beginPath(); ctx.moveTo(20 + i * 6, 9); ctx.lineTo(12 + i * 9, -5 + (i % 2) * 7); ctx.stroke();
+      }
+
+      ctx.fillStyle = '#8ac43f'; ctx.strokeStyle = '#111'; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.moveTo(12, 9); ctx.lineTo(61, 4); ctx.lineTo(56, -17); ctx.lineTo(20, -21); ctx.lineTo(16, -4); ctx.closePath(); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = '#77aa36'; ctx.fillRect(35, -20, 11, 25); ctx.strokeRect(35, -20, 11, 25);
+      ctx.beginPath(); ctx.moveTo(61, 4); ctx.quadraticCurveTo(76, 5, 79, -4); ctx.lineTo(58, -7); ctx.closePath(); ctx.fill(); ctx.stroke();
+      ctx.restore();
+    }
+
+    function drawMonster(m) {
+      var wiggle = Math.sin((state.frame + m.bob) / 8) * (m.kind === 'boss' ? 1.5 : 3);
+      ctx.save();
+      ctx.translate(m.x, m.y + wiggle);
+      ctx.fillStyle = m.color;
+      ctx.strokeStyle = '#111';
+      ctx.lineWidth = 3;
+
+      if (m.kind === 'armored') {
+        roundRect(0, 0, m.w, m.h, 17, true, true);
+        ctx.fillStyle = '#555'; ctx.fillRect(7, 7, m.w - 14, 12); ctx.strokeRect(7, 7, m.w - 14, 12);
+        ctx.fillStyle = '#222'; ctx.font = 'bold 16px system-ui'; ctx.fillText('NO', 17, 20);
+      } else if (m.kind === 'flying') {
+        ctx.beginPath(); ctx.ellipse(m.w / 2, m.h / 2, m.w / 2, m.h / 2, 0, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+        ctx.strokeStyle = '#111'; ctx.lineWidth = 3;
+        ctx.beginPath(); ctx.moveTo(7, 7); ctx.lineTo(-14, -12); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(m.w - 7, 7); ctx.lineTo(m.w + 14, -12); ctx.stroke();
+      } else if (m.kind === 'boss') {
+        roundRect(0, 0, m.w, m.h, 24, true, true);
+        ctx.fillStyle = '#ff5a2c';
+        ctx.fillRect(12, -16, (m.w - 24) * (m.hp / m.maxHp), 8);
+        ctx.strokeRect(12, -16, m.w - 24, 8);
+        ctx.fillStyle = '#111'; ctx.font = '900 18px system-ui'; ctx.fillText('BOSS ' + (m.level || 1), 22, 30);
+      } else if (m.kind === 'bossAttack') {
+        ctx.beginPath();
+        ctx.ellipse(m.w / 2, m.h / 2, m.w / 2, m.h / 2, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+        ctx.fillStyle = '#fff7b3';
+        ctx.beginPath(); ctx.arc(m.w * 0.65, m.h * 0.35, 4, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+      } else {
+        roundRect(0, 0, m.w, m.h, 16, true, true);
+      }
+
+      ctx.strokeStyle = '#111'; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.moveTo(m.w * 0.25, 3); ctx.lineTo(m.w * 0.1, -18); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(m.w * 0.7, 3); ctx.lineTo(m.w * 0.9, -16); ctx.stroke();
+      ctx.fillStyle = '#ff7b22';
+      ctx.beginPath(); ctx.arc(m.w * 0.1, -18, 5, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+      ctx.beginPath(); ctx.arc(m.w * 0.9, -16, 5, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+
+      for (var i = 0; i < m.eye; i++) {
+        var ex = (m.w / (m.eye + 1)) * (i + 1);
+        ctx.fillStyle = '#fff7b3';
+        ctx.beginPath(); ctx.ellipse(ex, m.h * 0.35, 9, 11, 0, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+        ctx.fillStyle = '#111'; ctx.beginPath(); ctx.arc(ex + 2, m.h * 0.36, 2.5, 0, Math.PI * 2); ctx.fill();
+      }
+
+      ctx.strokeStyle = '#111'; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.moveTo(10, m.h * 0.72); ctx.quadraticCurveTo(m.w / 2, m.h * 0.95, m.w - 10, m.h * 0.72); ctx.stroke();
+      ctx.fillStyle = '#fff';
+      var teeth = m.kind === 'boss' ? 6 : 3;
+      for (var t = 0; t < teeth; t++) {
+        ctx.beginPath(); ctx.moveTo(16 + t * 11, m.h * 0.75); ctx.lineTo(21 + t * 11, m.h * 0.88); ctx.lineTo(26 + t * 11, m.h * 0.75); ctx.closePath(); ctx.fill(); ctx.stroke();
+      }
+      ctx.restore();
+    }
+
+    function drawBullets() {
+      for (var i = 0; i < bullets.length; i++) {
+        var b = bullets[i];
+        ctx.fillStyle = '#ff7b22'; ctx.strokeStyle = '#111'; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+        ctx.strokeStyle = 'rgba(255,209,102,.7)'; ctx.beginPath(); ctx.moveTo(b.x - 18, b.y); ctx.lineTo(b.x - 6, b.y); ctx.stroke();
+      }
+    }
+
+    function drawParticles() {
+      for (var i = 0; i < particles.length; i++) {
+        var p = particles[i];
+        ctx.globalAlpha = Math.max(0, p.life / 34);
+        ctx.fillStyle = p.color;
+        ctx.beginPath(); ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2); ctx.fill();
+        ctx.globalAlpha = 1;
+      }
+    }
+
+    function drawUI() {
+      ctx.fillStyle = '#fff'; ctx.font = 'bold 22px system-ui';
+      ctx.fillText('Score ' + Math.floor(state.score), 24, 36);
+      ctx.fillText('Best ' + state.best, 24, 64);
+      ctx.fillStyle = state.fastMode ? '#ffdd55' : '#9bed6d';
+      ctx.font = 'bold 18px system-ui';
+      ctx.fillText(state.fastMode ? 'MODE ACCÉLÉRÉ !' : 'MODE NORMAL', 24, 92);
+
+      var nextSwitch = 250 - (Math.floor(state.score) % 250);
+      var nextBoss = BOSS_EVERY - (Math.floor(state.score) % BOSS_EVERY);
+      ctx.fillStyle = 'rgba(255,255,255,.75)'; ctx.font = '14px system-ui';
+      ctx.fillText('Changement dans ' + nextSwitch + ' pts', 24, 114);
+      if (isBossActive()) {
+        var boss = getActiveBoss();
+        ctx.fillText('BOSS niv. ' + (boss ? boss.level : '?') + ' : tire + évite ses attaques !', 24, 134);
+      }
+      else ctx.fillText('Boss dans ' + nextBoss + ' pts', 24, 134);
+
+      if (state.fullscreenBlocked) {
+        ctx.fillStyle = '#ffd166'; ctx.font = 'bold 14px system-ui';
+        ctx.fillText('Plein écran bloqué par le navigateur/iframe', W - 315, 34);
+      }
+
+      if (!state.started) panel('KID PADDLE MONSTER RUNNER', 'Espace sauter — F tirer — ↓ se baisser — M son', 'Appuie sur une touche ou clique pour commencer');
+      if (state.gameOver) panel('GAME OVER', 'Score : ' + Math.floor(state.score), 'Entrée pour recommencer');
+    }
+
+    function panel(title, line1, line2) {
+      ctx.save();
+      ctx.fillStyle = 'rgba(0,0,0,.68)'; roundRect(W / 2 - 250, 92, 500, 150, 18, true, false);
+      ctx.strokeStyle = '#ff9f1c'; ctx.lineWidth = 4; roundRect(W / 2 - 250, 92, 500, 150, 18, false, true);
+      ctx.textAlign = 'center'; ctx.fillStyle = '#ff9f1c'; ctx.font = '900 30px system-ui'; ctx.fillText(title, W / 2, 135);
+      ctx.fillStyle = '#fff'; ctx.font = '18px system-ui'; ctx.fillText(line1, W / 2, 173);
+      ctx.fillStyle = '#ddd'; ctx.font = '16px system-ui'; ctx.fillText(line2, W / 2, 204);
+      ctx.restore();
+    }
+
+    function roundRect(x, y, w, h, r, fill, stroke) {
+      ctx.beginPath();
+      ctx.moveTo(x + r, y);
+      ctx.lineTo(x + w - r, y);
+      ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+      ctx.lineTo(x + w, y + h - r);
+      ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+      ctx.lineTo(x + r, y + h);
+      ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+      ctx.lineTo(x, y + r);
+      ctx.quadraticCurveTo(x, y, x + r, y);
+      if (fill) ctx.fill();
+      if (stroke) ctx.stroke();
+    }
+
+    function draw() {
+      drawBackground();
+      for (var i = 0; i < monsters.length; i++) drawMonster(monsters[i]);
+      drawBullets();
+      drawKidPaddle();
+      drawParticles();
+      drawUI();
+    }
+
+    function loop() {
+      update();
+      draw();
+      requestAnimationFrame(loop);
+    }
+
+    function showFullscreenWarning(message) {
+      state.fullscreenBlocked = true;
+      state.fullscreenMessage = message;
+      fullscreenWarning.textContent = message;
+      fullscreenWarning.classList.add('visible');
+      clearTimeout(showFullscreenWarning.timer);
+      showFullscreenWarning.timer = setTimeout(function () { fullscreenWarning.classList.remove('visible'); }, 5500);
+    }
+
+    function toggleFullscreen() {
+      var target = gameWrap;
+      var fullscreenApiAvailable = Boolean(target.requestFullscreen || target.webkitRequestFullscreen || target.msRequestFullscreen);
+      if (!fullscreenApiAvailable) {
+        showFullscreenWarning('Le plein écran n’est pas disponible dans ce navigateur. Le jeu reste jouable normalement.');
+        return Promise.resolve(false);
+      }
+
+      try {
+        var isFull = document.fullscreenElement || document.webkitFullscreenElement || document.msFullscreenElement;
+        var result;
+        if (!isFull) {
+          var request = target.requestFullscreen || target.webkitRequestFullscreen || target.msRequestFullscreen;
+          result = request.call(target);
+        } else {
+          var exit = document.exitFullscreen || document.webkitExitFullscreen || document.msExitFullscreen;
+          result = exit.call(document);
+        }
+
+        if (result && typeof result.then === 'function') {
+          return result.then(function () {
+            state.fullscreenBlocked = false;
+            fullscreenWarning.classList.remove('visible');
+            return true;
+          }).catch(function (err) {
+            console.warn('Plein écran refusé :', err);
+            showFullscreenWarning('Plein écran bloqué par les permissions de la page/iframe. Ouvre le fichier dans un onglet normal pour l’activer.');
+            return false;
+          });
+        }
+
+        state.fullscreenBlocked = false;
+        fullscreenWarning.classList.remove('visible');
+        return Promise.resolve(true);
+      } catch (err) {
+        console.warn('Plein écran refusé :', err);
+        showFullscreenWarning('Plein écran bloqué par les permissions de la page/iframe. Ouvre le fichier dans un onglet normal pour l’activer.');
+        return Promise.resolve(false);
+      }
+    }
+
+    fsBtn.addEventListener('click', function () { toggleFullscreen(); });
+
+    function runTests() {
+      var results = [];
+      function test(name, fn) {
+        try {
+          var value = fn();
+          results.push({ name: name, ok: true, value: value });
+          console.assert(true, name);
+        } catch (err) {
+          results.push({ name: name, ok: false, err: err });
+          console.error('Test échoué:', name, err);
+        }
+      }
+
+      test('rectsOverlap détecte une collision simple', function () {
+        if (!rectsOverlap({x:0,y:0,w:10,h:10}, {x:5,y:5,w:10,h:10})) throw new Error('collision attendue');
+      });
+      test('rectsOverlap ignore deux rectangles séparés', function () {
+        if (rectsOverlap({x:0,y:0,w:10,h:10}, {x:20,y:20,w:10,h:10})) throw new Error('pas de collision attendue');
+      });
+      test('hitbox accroupie plus basse que hitbox debout', function () {
+        var oldDucking = kid.ducking;
+        var oldGrounded = kid.grounded;
+        kid.ducking = false; kid.grounded = true;
+        var standing = getKidHitbox();
+        kid.ducking = true;
+        var crouched = getKidHitbox();
+        kid.ducking = oldDucking; kid.grounded = oldGrounded;
+        if (!(crouched.y > standing.y && crouched.h < standing.h)) throw new Error('hitbox accroupie incorrecte');
+      });
+      test('mode rapide alterne tous les 250 points', function () {
+        var oldScore = state.score;
+        var oldFast = state.fastMode;
+        var oldBand = state.lastBand;
+        state.score = 249; updateSpeedMode(); var before = state.fastMode;
+        state.score = 250; updateSpeedMode(); var after = state.fastMode;
+        state.score = oldScore; state.fastMode = oldFast; state.lastBand = oldBand;
+        if (before === after || after !== true) throw new Error('alternance attendue à 250');
+      });
+      test('boss prévu tous les 500 points', function () {
+        if (BOSS_EVERY !== 500) throw new Error('BOSS_EVERY doit valoir 500');
+      });
+      test('spawnBoss nettoie les monstres existants et crée uniquement un boss', function () {
+        var oldMonsters = monsters.slice();
+        var oldBullets = bullets.slice();
+        var oldSpawnTimer = state.spawnTimer;
+        monsters.length = 0;
+        bullets.length = 0;
+        monsters.push({ kind: 'classic', x: 10, y: 10, w: 10, h: 10 });
+        monsters.push({ kind: 'flying', x: 20, y: 20, w: 10, h: 10 });
+        bullets.push({ x: 1, y: 1, vx: 1, r: 1 });
+        spawnBoss();
+        if (monsters.length !== 1 || monsters[0].kind !== 'boss') throw new Error('spawnBoss doit ne laisser qu’un boss');
+        if (bullets.length !== 0) throw new Error('spawnBoss doit vider les tirs');
+        monsters.length = 0;
+        Array.prototype.push.apply(monsters, oldMonsters);
+        bullets.length = 0;
+        Array.prototype.push.apply(bullets, oldBullets);
+        state.spawnTimer = oldSpawnTimer;
+      });
+      test('le boss reste à distance à BOSS_STOP_X', function () {
+        var boss = { kind: 'boss', x: BOSS_STOP_X - 40, y: 0, w: 118, h: 118 };
+        monsters.length = 0;
+        monsters.push(boss);
+        var oldStarted = state.started;
+        var oldGameOver = state.gameOver;
+        var oldScore = state.score;
+        state.started = true;
+        state.gameOver = false;
+        update();
+        state.started = oldStarted;
+        state.gameOver = oldGameOver;
+        state.score = oldScore;
+        monsters.length = 0;
+        if (boss.x !== BOSS_STOP_X) throw new Error('boss doit être repositionné à distance');
+      });
+      test('hitbox volante laisse passer Kid accroupi mais touche Kid debout', function () {
+        var oldX = kid.x;
+        var oldY = kid.y;
+        var oldGrounded = kid.grounded;
+        var oldDucking = kid.ducking;
+        kid.x = 88; kid.y = groundY - kid.h; kid.grounded = true;
+        var flying = { kind: 'flying', x: kid.x + 20, y: groundY - 118, w: 56, h: 42 };
+        kid.ducking = false;
+        var standingHit = rectsOverlap(getKidHitbox(), getMonsterHitbox(flying));
+        kid.ducking = true;
+        var crouchedHit = rectsOverlap(getKidHitbox(), getMonsterHitbox(flying));
+        kid.x = oldX; kid.y = oldY; kid.grounded = oldGrounded; kid.ducking = oldDucking;
+        if (!standingHit || crouchedHit) throw new Error('interaction volant/accroupi incorrecte');
+      });
+      test('toggleFullscreen ne doit pas propager les erreurs de permission', function () {
+        var original = gameWrap.requestFullscreen;
+        gameWrap.requestFullscreen = function () { return Promise.reject(new TypeError('Disallowed by permissions policy')); };
+        toggleFullscreen().then(function (ok) {
+          gameWrap.requestFullscreen = original;
+          if (ok !== false) console.error('Test async échoué: le refus doit retourner false');
+        });
+      });
+      test('PV du boss évoluent avec le niveau', function () {
+        if (getBossHp(1) !== BOSS_BASE_HP) throw new Error('PV boss niveau 1 incorrects');
+        if (getBossHp(3) <= getBossHp(1)) throw new Error('PV boss doivent augmenter');
+      });
+      test('spawnBoss crée un boss avec niveau et PV évolutifs', function () {
+        var oldScore = state.score;
+        var oldMonsters = monsters.slice();
+        state.score = 1000;
+        spawnBoss();
+        if (monsters.length !== 1 || monsters[0].kind !== 'boss') throw new Error('boss attendu');
+        if (monsters[0].level !== 2) throw new Error('boss niveau 2 attendu');
+        if (monsters[0].hp !== getBossHp(2)) throw new Error('PV boss niveau 2 incorrects');
+        monsters.length = 0;
+        Array.prototype.push.apply(monsters, oldMonsters);
+        state.score = oldScore;
+      });
+      test('attaque boss créée et marquée bossAttack', function () {
+        var oldMonsters = monsters.slice();
+        monsters.length = 0;
+        var boss = { kind: 'boss', x: BOSS_STOP_X, y: groundY - 118, w: 118, h: 118, level: 2, attackCooldown: 0 };
+        monsters.push(boss);
+        spawnBossAttack(boss);
+        var found = false;
+        for (var i = 0; i < monsters.length; i++) if (monsters[i].kind === 'bossAttack') found = true;
+        monsters.length = 0;
+        Array.prototype.push.apply(monsters, oldMonsters);
+        if (!found) throw new Error('attaque boss attendue');
+      });
+      test('syntaxe JavaScript compatible sans catch sans paramètre', function () {
+        var source = document.querySelector('script').textContent;
+        if (/catch\s*\{/.test(source)) throw new Error('catch sans paramètre détecté');
+      });
+
+      var passed = results.filter(function (r) { return r.ok; }).length;
+      console.log('Tests terminés : ' + passed + '/' + results.length + ' réussis', results);
+      puff(W - 80, 70, 24, passed === results.length ? '#7be37b' : '#ff4d4d');
+      return results;
+    }
+
+    testBtn.addEventListener('click', runTests);
+    window.KidPaddleRunnerTests = runTests;
+
+    loop();
+  </script>
+</body>
+</html>
