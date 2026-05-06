@@ -24,6 +24,135 @@
       letter-spacing: 1px;
     }
     .subtitle { margin: 0 0 14px; opacity: .85; }
+    .splash-screen {
+      position: absolute;
+      inset: 0;
+      z-index: 30;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      text-align: center;
+      padding: 30px;
+      background:
+        linear-gradient(rgba(0,0,0,.35), rgba(0,0,0,.65)),
+        radial-gradient(circle at center, rgba(123,41,168,.55), rgba(10,5,20,.95));
+      overflow: hidden;
+    }
+    .splash-bg {
+      position: absolute;
+      inset: 0;
+      background:
+        radial-gradient(circle at 50% 30%, rgba(255,180,60,.25), transparent 35%),
+        repeating-radial-gradient(circle at center, rgba(255,255,255,.04) 0 12px, transparent 12px 26px),
+        linear-gradient(135deg, #2d1247, #0c0716 70%);
+      animation: splashPulse 5s infinite alternate ease-in-out;
+    }
+    @keyframes splashPulse {
+      from { transform: scale(1); filter: hue-rotate(0deg); }
+      to { transform: scale(1.05); filter: hue-rotate(18deg); }
+    }
+    .splash-art {
+      position: relative;
+      width: min(760px, 92%);
+      height: 300px;
+      margin-bottom: 20px;
+    }
+    .splash-kid {
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      transform: translate(-50%, -50%);
+      width: 220px;
+      filter: drop-shadow(0 18px 30px rgba(0,0,0,.6));
+      animation: kidRun 0.9s infinite alternate ease-in-out;
+    }
+    @keyframes kidRun {
+      from { transform: translate(-50%, -50%) translateY(-6px) rotate(-2deg); }
+      to { transform: translate(-50%, -50%) translateY(6px) rotate(2deg); }
+    }
+    .splash-monster {
+      position: absolute;
+      width: 120px;
+      height: 120px;
+      border-radius: 50%;
+      border: 6px solid #111;
+      box-shadow: 0 12px 24px rgba(0,0,0,.45);
+      animation: floatMonster 1.8s infinite ease-in-out alternate;
+    }
+    .monster-a {
+      left: 4%; top: 52%;
+      background: radial-gradient(circle at 35% 35%, #ffd166, #c75146 72%);
+    }
+    .monster-b {
+      right: 6%; top: 20%;
+      background: radial-gradient(circle at 35% 35%, #fff3b0, #85c63d 72%);
+      animation-delay: .4s;
+    }
+    .monster-c {
+      right: 14%; bottom: 0%;
+      background: radial-gradient(circle at 35% 35%, #ffffff, #8e44ec 72%);
+      animation-delay: .8s;
+    }
+    @keyframes floatMonster {
+      from { transform: translateY(-6px) rotate(-5deg); }
+      to { transform: translateY(10px) rotate(5deg); }
+    }
+    .monster-eye {
+      position: absolute;
+      width: 26px;
+      height: 34px;
+      background: white;
+      border-radius: 50%;
+      top: 26px;
+      left: 44px;
+      border: 4px solid #111;
+    }
+    .monster-eye::after {
+      content: '';
+      position: absolute;
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      background: #111;
+      right: 4px;
+      top: 12px;
+    }
+    .splash-title {
+      position: relative;
+      z-index: 2;
+      font-size: clamp(2.2rem, 7vw, 5rem);
+      font-weight: 900;
+      color: #ffb347;
+      text-shadow: 5px 5px 0 #000, 0 0 25px rgba(255,180,71,.5);
+      letter-spacing: 2px;
+      margin-bottom: 12px;
+    }
+    .splash-subtitle {
+      position: relative;
+      z-index: 2;
+      max-width: 720px;
+      font-size: clamp(1rem, 2vw, 1.3rem);
+      color: #fff;
+      opacity: .95;
+      margin-bottom: 26px;
+    }
+    .start-btn {
+      position: relative;
+      z-index: 2;
+      border: none;
+      border-radius: 16px;
+      padding: 18px 34px;
+      background: linear-gradient(#ffcc5c, #f28c28);
+      color: #111;
+      font-size: clamp(1rem, 2vw, 1.35rem);
+      font-weight: 900;
+      cursor: pointer;
+      box-shadow: 0 8px 0 #8b4d00, 0 14px 30px rgba(0,0,0,.45);
+      transition: transform .15s ease;
+    }
+    .start-btn:hover { transform: translateY(-2px) scale(1.02); }
+    .start-btn:active { transform: translateY(4px); box-shadow: 0 4px 0 #8b4d00; }
     .game-wrap {
       position: relative;
       border: 5px solid #111;
@@ -67,9 +196,35 @@
       justify-content: center;
       gap: 14px;
       flex-wrap: wrap;
-      margin: 14px 0 20px;
+      margin: 14px 0 12px;
       font-size: .95rem;
       opacity: .9;
+    }
+    .mobile-controls {
+      display: none;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 8px;
+      margin: 0 0 20px;
+    }
+    .mobile-controls button {
+      min-height: 48px;
+      border-radius: 12px;
+      border: 2px solid #111;
+      background: linear-gradient(#ffb347, #f28c28);
+      color: #111;
+      font-weight: 900;
+      font-size: 14px;
+      box-shadow: 0 4px 0 #111;
+      touch-action: manipulation;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+    .mobile-controls button:active {
+      transform: translateY(3px);
+      box-shadow: 0 1px 0 #111;
+    }
+    @media (hover: none), (pointer: coarse) {
+      .mobile-controls { display: grid; }
     }
     kbd {
       background: #111;
@@ -89,6 +244,21 @@
       <button id="fsBtn" class="fs-btn" type="button">⛶ Plein écran</button>
       <button id="testBtn" class="test-btn" type="button">Tests</button>
       <div id="fullscreenWarning" class="fullscreen-warning"></div>
+      <div class="splash-screen" id="splashScreen">
+        <div class="splash-bg"></div>
+        <div class="splash-art">
+          <img id="splashKid" class="splash-kid" src="kid.png" alt="Kid Paddle">
+          <div class="splash-monster monster-a"><div class="monster-eye"></div></div>
+          <div class="splash-monster monster-b"><div class="monster-eye"></div></div>
+          <div class="splash-monster monster-c"><div class="monster-eye"></div></div>
+        </div>
+        <div class="splash-title">KID PADDLE<br>MONSTER RUNNER</div>
+        <div class="splash-subtitle">
+          Kid Paddle fuit une invasion de monstres complètement barrés !<br>
+          Saute, baisse-toi, tire et survie le plus longtemps possible dans ce runner arcade rétro.
+        </div>
+        <button id="startBtn" class="start-btn" type="button">▶ COMMENCER LA PARTIE</button>
+      </div>
       <canvas id="game" width="900" height="360" aria-label="Jeu Kid Paddle Monster Runner"></canvas>
     </div>
     <div class="hud">
@@ -99,6 +269,12 @@
       <span><kbd>P</kbd> plein écran</span>
       <span><kbd>Entrée</kbd> recommencer</span>
       <span>Mobile : gauche = saut, droite = tir</span>
+    </div>
+    <div class="mobile-controls" aria-label="Contrôles tactiles">
+      <button id="mobileJump" type="button">⬆️ Sauter</button>
+      <button id="mobileCrouch" type="button">⬇️ Baisser</button>
+      <button id="mobileShoot" type="button">🔫 Tirer</button>
+      <button id="mobileRestart" type="button">↻ Rejouer</button>
     </div>
   </main>
 
@@ -111,6 +287,12 @@
     var fsBtn = document.getElementById('fsBtn');
     var testBtn = document.getElementById('testBtn');
     var fullscreenWarning = document.getElementById('fullscreenWarning');
+    var mobileJump = document.getElementById('mobileJump');
+    var mobileCrouch = document.getElementById('mobileCrouch');
+    var mobileShoot = document.getElementById('mobileShoot');
+    var mobileRestart = document.getElementById('mobileRestart');
+    var splashScreen = document.getElementById('splashScreen');
+    var startBtn = document.getElementById('startBtn');
 
     var W = canvas.width;
     var H = canvas.height;
@@ -241,7 +423,16 @@
       };
     }());
 
+    function hideSplash() {
+      if (splashScreen) splashScreen.style.display = 'none';
+    }
+
+    function showSplash() {
+      if (splashScreen) splashScreen.style.display = 'flex';
+    }
+
     function reset() {
+      hideSplash();
       ArcadeSound.unlock();
       state.started = true;
       state.gameOver = false;
@@ -312,6 +503,32 @@
       var rect = canvas.getBoundingClientRect();
       var x = e.clientX - rect.left;
       if (x < rect.width / 2) jump(); else shoot();
+    });
+
+    function bindMobileButton(button, onPress, onRelease) {
+      if (!button) return;
+      button.addEventListener('pointerdown', function (e) {
+        e.preventDefault();
+        button.setPointerCapture && button.setPointerCapture(e.pointerId);
+        onPress();
+      });
+      button.addEventListener('pointerup', function (e) {
+        e.preventDefault();
+        if (onRelease) onRelease();
+      });
+      button.addEventListener('pointercancel', function (e) {
+        e.preventDefault();
+        if (onRelease) onRelease();
+      });
+      button.addEventListener('contextmenu', function (e) { e.preventDefault(); });
+    }
+
+    bindMobileButton(mobileJump, jump);
+    bindMobileButton(mobileShoot, shoot);
+    bindMobileButton(mobileCrouch, crouch, function () { kid.ducking = false; });
+    bindMobileButton(mobileRestart, function () {
+      if (state.gameOver) reset();
+      else if (!state.started) reset();
     });
 
     function currentBand() { return Math.floor(state.score / 250); }
@@ -747,8 +964,8 @@
         ctx.fillText('Plein écran bloqué par le navigateur/iframe', W - 315, 34);
       }
 
-      if (!state.started) panel('KID PADDLE MONSTER RUNNER', 'Espace sauter — F tirer — ↓ se baisser — M son', 'Appuie sur une touche ou clique pour commencer');
-      if (state.gameOver) panel('GAME OVER', 'Score : ' + Math.floor(state.score), 'Entrée pour recommencer');
+      if (!state.started && (!splashScreen || splashScreen.style.display === 'none')) panel('KID PADDLE MONSTER RUNNER', 'Espace sauter — F tirer — ↓ se baisser — M son', 'Sur mobile : bouton Sauter ou Tirer pour commencer');
+      if (state.gameOver) panel('GAME OVER', 'Score : ' + Math.floor(state.score), 'Entrée ou bouton Rejouer pour recommencer');
     }
 
     function panel(title, line1, line2) {
@@ -968,6 +1185,28 @@
         Array.prototype.push.apply(monsters, oldMonsters);
         if (!found) throw new Error('attaque boss attendue');
       });
+      test('écran splash présent', function () {
+        if (!splashScreen || !startBtn) throw new Error('écran d’accueil manquant');
+      });
+      test('boutons mobiles présents', function () {
+        if (!mobileJump || !mobileCrouch || !mobileShoot || !mobileRestart) throw new Error('boutons mobiles manquants');
+      });
+      test('bouton mobile baisser active/désactive ducking', function () {
+        var oldStarted = state.started;
+        var oldGameOver = state.gameOver;
+        var oldGrounded = kid.grounded;
+        var oldDucking = kid.ducking;
+        state.started = true;
+        state.gameOver = false;
+        kid.grounded = true;
+        crouch();
+        if (!kid.ducking) throw new Error('crouch doit activer ducking');
+        kid.ducking = false;
+        state.started = oldStarted;
+        state.gameOver = oldGameOver;
+        kid.grounded = oldGrounded;
+        kid.ducking = oldDucking;
+      });
       test('syntaxe JavaScript compatible sans catch sans paramètre', function () {
         var source = document.querySelector('script').textContent;
         if (/catch\s*\{/.test(source)) throw new Error('catch sans paramètre détecté');
@@ -981,6 +1220,12 @@
 
     testBtn.addEventListener('click', runTests);
     window.KidPaddleRunnerTests = runTests;
+
+    if (startBtn) {
+      startBtn.addEventListener('click', function () {
+        reset();
+      });
+    }
 
     loop();
   </script>
