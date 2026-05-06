@@ -780,7 +780,8 @@
       drawBackground();
       for (var i = 0; i < monsters.length; i++) drawMonster(monsters[i]);
       drawBullets();
-      drawKidPaddle();
+      //drawKidPaddle();
+	  ctx.drawImage(kidImg, kid.x, kid.y, kid.w, kid.h);
       drawParticles();
       drawUI();
     }
